@@ -24,14 +24,18 @@ uvx install mcp-ws
 
 ## Usage
 
-```bash
-mcp-ws <websocket-url>
-```
-
-Example:
+### Standard Usage
 
 ```bash
 mcp-ws wss://example.com/socket
+```
+
+### Direct UVX Execution
+
+Run the tool directly with UVX without installing it first:
+
+```bash
+uvx mcp-ws wss://example.com/socket
 ```
 
 ## Features
