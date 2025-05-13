@@ -3,11 +3,20 @@ import asyncio
 import sys
 import websockets
 import os
+import json
 
 
-async def connect_stdio_to_ws(url):
+async def connect_stdio_to_ws(url, headers=None):
     try:
-        async with websockets.connect(url) as ws:
+        extra_headers = {}
+        if headers:
+            try:
+                extra_headers = json.loads(headers)
+            except json.JSONDecodeError as e:
+                print(f"Error parsing headers JSON: {e}", file=sys.stderr)
+                sys.exit(1)
+        
+        async with websockets.connect(url, extra_headers=extra_headers) as ws:
             # Task to read from stdin and send to WebSocket
             async def send_stdin():
                 # Set stdin to non-blocking mode
@@ -57,10 +66,15 @@ def main():
         description="Connect local stdio to a remote WebSocket server"
     )
     parser.add_argument("url", help="WebSocket server URL (e.g., ws://example.com)")
+    parser.add_argument(
+        "--headers", 
+        "-H", 
+        help='Additional HTTP headers as JSON string (e.g., \'{"Authorization": "Bearer token"}\')'
+    )
     args = parser.parse_args()
 
     # Run the async WebSocket connection
-    asyncio.run(connect_stdio_to_ws(args.url))
+    asyncio.run(connect_stdio_to_ws(args.url, args.headers))
 
 
 if __name__ == "__main__":

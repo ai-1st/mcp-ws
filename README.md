@@ -4,7 +4,7 @@ A CLI tool to connect local stdio (standard input/output) to a remote WebSocket 
 
 ## Overview
 
-`mcp-ws` is designed to be complementary to [ws-mcp](https://github.com/nick1udwig/ws-mcp), which wraps stdio servers with websockets. This tool provides the client-side functionality, allowing you to connect to those websocket servers from your terminal.
+`mcp-ws` is designed to be complementary to [ws-mcp](https://github.com/nick1udwig/ws-mcp), which wraps stdio MCP servers with websockets. This tool provides the client-side functionality, allowing you to connect to those websocket servers from your terminal.
 
 Unlike [wscat](https://github.com/websockets/wscat), `mcp-ws` doesn't output prompts like `>` and `<` which can confuse MCP clients.
 
@@ -30,12 +30,26 @@ uvx install mcp-ws
 mcp-ws wss://example.com/socket
 ```
 
+With additional headers:
+
+```bash
+mcp-ws wss://example.com/socket --headers '{"Authorization": "Bearer token"}'
+# or using the short form
+mcp-ws wss://example.com/socket -H '{"Authorization": "Bearer token"}'
+```
+
 ### Direct UVX Execution
 
 Run the tool directly with UVX without installing it first:
 
 ```bash
 uvx mcp-ws wss://example.com/socket
+```
+
+With additional headers:
+
+```bash
+uvx mcp-ws wss://example.com/socket --headers '{"Authorization": "Bearer token"}'
 ```
 
 ## Features
