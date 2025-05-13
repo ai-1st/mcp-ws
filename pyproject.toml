@@ -1,0 +1,15 @@
+[project]
+name = "mcp-ws"
+version = "0.1.2"
+description = "CLI tool to connect local stdio to a remote WebSocket server"
+requires-python = ">=3.12"
+dependencies = [
+    "websockets>=12.0",
+]
+
+[project.scripts]
+mcp-ws = "mcp_ws.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
