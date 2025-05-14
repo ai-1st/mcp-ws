@@ -1,70 +1,20 @@
 import argparse
-import asyncio
 import sys
-import websockets
-import os
+import threading
 import json
-from datetime import datetime
+import logging
+from websockets.sync.client import connect
+from websockets.exceptions import ConnectionClosed, WebSocketException
 
-async def connect_stdio_to_ws(url, headers=None, log_messages=None):
-    try:
-        headers_dict = {}
-        if headers:
-            try:
-                headers_dict = json.loads(headers)
-            except json.JSONDecodeError as e:
-                print(f"Error parsing headers JSON: {e}", file=sys.stderr)
-                sys.exit(1)
-        
-        # In websockets 15.0+, we need to use 'additional_headers' instead of 'extra_headers'
-        async with websockets.connect(url, additional_headers=headers_dict) as ws:
-            # Task to read from stdin and send to WebSocket
-            async def send_stdin():
-                # Keep stdin in blocking mode, but use asyncio to handle it properly
-                loop = asyncio.get_event_loop()
-                
-                while True:
-                    try:
-                        # Use asyncio to read from stdin asynchronously in a way that won't block the event loop
-                        line = await loop.run_in_executor(None, lambda: sys.stdin.readline())
-                        
-                        line = line.strip()
-                        
-                        if not line and not sys.stdin.isatty():  # EOF
-                            break
-                        
-                        if line:  # Only send non-empty lines
-                            if log_messages:
-                                with open(log_messages, 'a') as f:
-                                    f.write(f'> {line}\n')
-                            await ws.send(line)
-                    except BlockingIOError:
-                        # If we get a blocking error, just wait a bit and try again
-                        await asyncio.sleep(0.1)
-                        continue
-                    except Exception as e:
-                        print(f"Error sending to WebSocket: {e}", file=sys.stderr)
-                        break
-                    
-                    # Small sleep to prevent CPU hogging
-                    await asyncio.sleep(0.1)
 
-            # Task to receive from WebSocket and print to stdout
-            async def receive_ws():
-                try:
-                    async for message in ws:
-                        if log_messages:
-                            with open(log_messages, 'a') as f:
-                                f.write(f'< {message}\n')
-                        print(message, flush=True)
-                except Exception as e:
-                    print(f"Error receiving from WebSocket: {e}", file=sys.stderr)
-
-            # Run both tasks concurrently
-            await asyncio.gather(send_stdin(), receive_ws())
-    except Exception as e:
-        print(f"WebSocket connection error: {e}", file=sys.stderr)
-        sys.exit(1)
+def setup_logging(logfile):
+    """Configure logging to a file if specified."""
+    if logfile:
+        logging.basicConfig(
+            filename=logfile,
+            level=logging.DEBUG,
+            format="%(asctime)s - %(levelname)s - %(message)s",
+        )
 
 
 def main():
@@ -73,23 +23,88 @@ def main():
     )
     parser.add_argument("url", help="WebSocket server URL (e.g., ws://example.com)")
     parser.add_argument(
-        "--headers", 
-        "-H", 
-        help='Additional HTTP headers as JSON string (e.g., \'{"Authorization": "Bearer token"}\')'
+        "--headers",
+        "-H",
+        help='Additional HTTP headers as JSON string (e.g., \'{"Authorization": "Bearer token"}\')',
     )
     parser.add_argument(
         "--log-messages",
-        "-d",
-        help="Write messages into a logfile for debugging purposes."
+        "-L",
+        help="Write messages into a logfile for debugging purposes.",
     )
     args = parser.parse_args()
 
-    if args.log_messages:
-        with open(args.log_messages, 'a') as f:
-            f.write(f'Server started at {datetime.now()}\n')
+    # Set up logging if specified
+    setup_logging(args.log_messages)
 
-    # Run the async WebSocket connection
-    asyncio.run(connect_stdio_to_ws(args.url, args.headers, args.log_messages))
+    # Parse headers if provided
+    headers = {}
+    if args.headers:
+        try:
+            headers = json.loads(args.headers)
+            if not isinstance(headers, dict):
+                logging.error("Headers must be a JSON object")
+                sys.exit(1)
+        except json.JSONDecodeError as e:
+            logging.error(f"Error parsing headers JSON: {e}")
+            sys.exit(1)
+
+    # Flag to signal shutdown
+    shutdown_event = threading.Event()
+
+    def send_stdin(websocket):
+        """Synchronously read from stdin and send to WebSocket."""
+        try:
+            while not shutdown_event.is_set():
+                line = sys.stdin.readline().strip()
+                if not line:  # EOF or empty input
+                    break
+                try:
+                    websocket.send(line)
+                    if args.log_messages:
+                        logging.debug(f"Sent: {line}")
+                except WebSocketException as e:
+                    logging.error(f"Error sending message: {e}")
+                    shutdown_event.set()
+        except Exception as e:
+            logging.error(f"Error reading stdin: {e}")
+        finally:
+            shutdown_event.set()
+
+    try:
+        with connect(args.url, additional_headers=headers) as websocket:
+            # Start thread to read stdin and send synchronously
+            stdin_thread = threading.Thread(target=send_stdin, args=(websocket,))
+            stdin_thread.daemon = True
+            stdin_thread.start()
+
+            # Main thread receives messages and prints to stdout
+            while not shutdown_event.is_set():
+                try:
+                    message = websocket.recv(timeout=1.0)
+                    print(message, flush=True)
+                    if args.log_messages:
+                        logging.debug(f"Received: {message}")
+                except TimeoutError:
+                    continue
+                except ConnectionClosed:
+                    logging.error("WebSocket connection closed")
+                    shutdown_event.set()
+                    break
+                except WebSocketException as e:
+                    logging.error(f"Error receiving message: {e}")
+                    shutdown_event.set()
+                    break
+
+    except WebSocketException as e:
+        logging.error(f"WebSocket connection error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        sys.exit(1)
+    finally:
+        shutdown_event.set()
+        stdin_thread.join(timeout=1.0)
 
 
 if __name__ == "__main__":
